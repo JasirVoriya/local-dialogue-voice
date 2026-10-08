@@ -1,0 +1,26 @@
+docs/images/local-workflow.svg
+  s_42d1aaf8560e2f::t_d68f0c0027af00 1-21
+README.md
+  s_42d1aaf8560e2f::t_a5da706b7e3c91 28,38,41,45
+  s_42d1aaf8560e2f::t_d68f0c0027af00 3,5,7,9-16,20-27,29-37,39-40,42-44,46-132,134,136-137
+docs/images/reference-selection.svg
+  s_42d1aaf8560e2f::t_d68f0c0027af00 1-14
+docs/images/generate-output.svg
+  s_42d1aaf8560e2f::t_d68f0c0027af00 1-13
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "067deafd4cbcada3cb3eb11552af2380a69af563",
+  "prompts": {},
+  "sessions": {
+    "s_42d1aaf8560e2f": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a10512-ce73-7763-9855-7347b7951a73",
+        "model": "gpt-6-luna"
+      },
+      "human_author": "JasirVoriya <jasirvoriya@gmail.com>"
+    }
+  }
+}
