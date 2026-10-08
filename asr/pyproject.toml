@@ -1,0 +1,9 @@
+[project]
+name = "local-dialogue-voice-asr"
+version = "0.1.0"
+description = "本机台词配音工具的转写环境"
+requires-python = ">=3.12,<3.13"
+dependencies = [
+  "qwen-asr==0.0.6",
+  "modelscope>=1.30,<2",
+]

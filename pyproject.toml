@@ -1,0 +1,12 @@
+[project]
+name = "local-dialogue-voice"
+version = "0.1.0"
+description = "本机台词配音工具"
+requires-python = ">=3.12,<3.13"
+dependencies = [
+  "fastapi>=0.115,<1",
+  "uvicorn>=0.34,<1",
+  "python-multipart>=0.0.20,<1",
+  "qwen-tts>=0.1.1,<1",
+  "modelscope>=1.30,<2",
+]

@@ -1,0 +1,111 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light">
+<title>本机台词配音工具</title>
+<style>
+:root{font-family:-apple-system,BlinkMacSystemFont,"SF Pro Text","PingFang SC",sans-serif;color:#17251f;background:#f4f6f2;font-synthesis:none;text-rendering:optimizeLegibility;--green:#176b4b;--green2:#dcece3;--ink:#17251f;--muted:#65746c;--line:#dce4dd;--card:#fff;--gold:#c68a36;--red:#a43f35}
+*{box-sizing:border-box}body{margin:0;background:radial-gradient(ellipse at 16% 0%,#e9f1e9 0,transparent 36%),#f4f6f2;color:var(--ink)}
+main{max-width:1050px;margin:0 auto;padding:30px 22px 60px}.brand{display:flex;justify-content:space-between;align-items:flex-start;gap:18px;margin-bottom:24px}.brand h1{font-size:27px;letter-spacing:.02em;margin:0 0 8px}.brand p{margin:0;color:var(--muted);font-size:14px}.local-badge{white-space:nowrap;border:1px solid #cce0d3;border-radius:999px;padding:8px 12px;color:var(--green);font-size:12px;background:#f8fcf8}
+.step{background:var(--card);border:1px solid var(--line);border-radius:17px;padding:22px 24px;margin:15px 0;box-shadow:0 3px 14px rgba(29,50,38,.035)}.step-heading{display:flex;align-items:center;gap:12px;margin-bottom:16px}.number{width:30px;height:30px;border-radius:50%;display:grid;place-items:center;color:white;background:var(--green);font-weight:700}.step h2{font-size:17px;margin:0}.step-heading small{margin-left:auto;color:var(--muted)}
+.drop{min-height:115px;border:1.5px dashed #b7c8bc;border-radius:14px;background:#fbfdfb;display:flex;align-items:center;justify-content:center;text-align:center;padding:20px;cursor:pointer;transition:.15s}.drop:hover,.drop.drag{border-color:var(--green);background:#f4faf5}.drop strong{display:block;font-size:15px;margin-bottom:6px}.drop span{font-size:13px;color:var(--muted)}input[type=file]{display:none}.filename{margin-top:10px;color:var(--muted);font-size:13px}
+video{width:100%;max-height:440px;background:#101512;border-radius:12px;margin-top:6px} .range-top{display:flex;justify-content:space-between;align-items:center;margin:13px 0 8px;color:var(--muted);font-size:13px}.time-pill{font-variant-numeric:tabular-nums;color:var(--ink);background:#f0f4f0;border-radius:7px;padding:5px 9px}.timeline{position:relative;height:34px;margin:8px 13px 10px;background:#e1e8e2;border-radius:9px;touch-action:none;user-select:none}.timeline:before{content:"";position:absolute;top:14px;left:0;right:0;height:6px;background:#d4ddd5;border-radius:9px}.selection{position:absolute;top:14px;height:6px;background:var(--green);border-radius:5px}.playhead{position:absolute;top:8px;width:2px;height:18px;background:#ba7d25;pointer-events:none}.handle{position:absolute;top:5px;width:17px;height:24px;padding:0;transform:translateX(-50%);border:2px solid white;border-radius:7px;background:var(--green);box-shadow:0 1px 4px #38554866;cursor:ew-resize;touch-action:none}.handle:focus{outline:2px solid #8bb8a0}.range-help{font-size:12px;color:var(--muted);margin:0 0 12px}.inline-fields{display:grid;grid-template-columns:1fr 1fr auto;gap:10px;align-items:end}.field label{display:block;font-size:12px;color:var(--muted);margin:0 0 6px}.field input,.field textarea,.textarea{width:100%;border:1px solid var(--line);border-radius:9px;background:#fff;padding:10px 12px;color:var(--ink);font:inherit}.field input:focus,.field textarea:focus,.textarea:focus{outline:2px solid #b6d5c2;border-color:var(--green)}
+textarea{resize:vertical;line-height:1.7}.transcript{min-height:105px}.reftext{min-height:68px}.script{min-height:220px;font-size:15px}.muted{color:var(--muted);font-size:13px;line-height:1.55}.controls{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-top:14px}.button{border:1px solid var(--line);background:white;color:var(--ink);padding:10px 15px;border-radius:9px;font:inherit;font-size:14px;cursor:pointer;transition:.15s}.button:hover{border-color:#9bb7a3;transform:translateY(-1px)}.button.primary{background:var(--green);border-color:var(--green);color:white;font-weight:600}.button.primary:hover{background:#10583d}.button:disabled{opacity:.55;cursor:wait;transform:none}.button.subtle{color:var(--green);border-color:#d0dfd5;background:#f7fbf8}.button.danger{color:var(--red)}
+.progressbox{display:none;margin-top:16px;padding:13px 14px;background:#f7faf7;border:1px solid var(--line);border-radius:10px}.progressrow{display:flex;justify-content:space-between;gap:10px;font-size:13px;color:var(--muted);margin-bottom:9px}.bar{height:7px;background:#e4ebe5;border-radius:9px;overflow:hidden}.bar>i{display:block;height:100%;width:0;background:var(--green);transition:width .25s}.error{color:var(--red);white-space:pre-wrap;font-size:13px;margin-top:10px}.hidden{display:none!important}.selected-line{margin-top:14px}.generated{display:grid;gap:10px;margin-top:18px}.line-card{border:1px solid var(--line);border-radius:12px;padding:13px 14px;background:#fbfcfb}.line-card-top{display:grid;grid-template-columns:34px 1fr auto;gap:10px;align-items:center;margin-bottom:10px}.line-index{font-size:12px;color:var(--muted)}.line-text{border:1px solid var(--line);border-radius:8px;padding:9px 10px;font:inherit;min-width:0}.line-card audio,.full-audio audio{width:100%;height:38px}.full-audio{margin-top:17px;padding:16px;background:#f5faf6;border:1px solid #d5e4d8;border-radius:13px}.full-audio h3{font-size:14px;margin:0 0 10px}.full-audio a{display:inline-block;margin-top:9px;color:var(--green);font-size:13px}.status-note{margin:12px 0 0;font-size:12px;color:var(--muted)}.foot{margin-top:20px;text-align:center;color:#7b8980;font-size:12px}.divider{height:1px;background:var(--line);margin:17px 0}.warning{padding:10px 12px;background:#fff9ed;color:#775718;border-radius:9px;font-size:12px;line-height:1.6;margin-top:12px}
+@media(max-width:650px){main{padding:20px 13px 42px}.step{padding:17px 15px}.brand{display:block}.local-badge{display:inline-block;margin-top:13px}.inline-fields{grid-template-columns:1fr 1fr}.inline-fields .button{grid-column:1/-1}.line-card-top{grid-template-columns:25px 1fr}.line-card-top .button{grid-column:2;justify-self:start}}
+</style>
+</head>
+<body>
+<main>
+  <header class="brand"><div><h1>本机台词配音工具</h1><p>用视频里的音色和说话方式，生成新的台词音频。</p></div><span class="local-badge">🔒 本机处理 · 只导出音频</span></header>
+
+  <section class="step" id="stepUpload">
+    <div class="step-heading"><span class="number">1</span><h2>选择参考视频</h2><small>MP4 / MOV / MKV / WebM</small></div>
+    <label class="drop" id="dropzone"><div><strong>点这里选择，或把视频拖到这里</strong><span>视频只传到这台电脑上的本地程序，不会上传到云端。</span></div><input type="file" id="videoFile" accept="video/mp4,video/quicktime,video/x-m4v,video/x-matroska,video/webm"></label>
+    <div id="uploadStatus" class="filename"></div>
+  </section>
+
+  <section class="step hidden" id="stepReference">
+    <div class="step-heading"><span class="number">2</span><h2>选原声参考句</h2><small>拖动两侧把手调整范围</small></div>
+    <video id="video" controls playsinline></video>
+    <div class="range-top"><span>参考句范围</span><span class="time-pill"><span id="startLabel">00:00.0</span> — <span id="endLabel">00:00.0</span></span></div>
+    <div class="timeline" id="timeline" aria-label="拖动绿色把手选取原声范围"><div class="selection" id="selection"></div><div class="playhead" id="playhead"></div><button class="handle" id="startHandle" aria-label="参考句开始"></button><button class="handle" id="endHandle" aria-label="参考句结束"></button></div>
+    <p class="range-help">绿色范围是要模仿的句子。可拖动把手，也可在视频时间轴播放后点击下方按钮设定起止点。</p>
+    <div class="inline-fields">
+      <div class="field"><label for="startInput">起始时间（秒）</label><input id="startInput" type="number" min="0" step="0.1" value="0"></div>
+      <div class="field"><label for="endInput">结束时间（秒）</label><input id="endInput" type="number" min="0.1" step="0.1" value="3"></div>
+      <button class="button subtle" id="setStartBtn" type="button">从播放位置设起点</button>
+      <button class="button subtle" id="setEndBtn" type="button">从播放位置设终点</button>
+    </div>
+    <div class="controls"><button class="button primary" id="transcribeBtn" type="button">识别视频台词</button><span class="muted">首次识别会下载本机模型，之后无需重复下载。</span></div>
+    <div class="progressbox" id="progressBox"><div class="progressrow"><span id="progressMessage">正在处理…</span><span id="progressPercent">0%</span></div><div class="bar"><i id="progressBar"></i></div><div class="error" id="progressError"></div></div>
+  </section>
+
+  <section class="step hidden" id="stepTranscript">
+    <div class="step-heading"><span class="number">3</span><h2>校对原声文字</h2><small>识别可能听错方言或专名，请确认后再生成</small></div>
+    <div class="field"><label for="transcriptText">整段视频的原声转写（可修改）</label><textarea class="transcript" id="transcriptText" placeholder="识别后会显示在这里"></textarea></div>
+    <div class="selected-line field"><label for="referenceText">所选参考句原话（会自动按时间范围提取，可修改）</label><textarea class="reftext" id="referenceText" placeholder="选择时间范围后，在这里校对该句原话"></textarea></div>
+    <div class="controls"><button class="button subtle" id="syncPhraseBtn" type="button">按当前时间范围重新提取原话</button><span class="muted" id="alignInfo">拖动时间范围后检查这句文字是否准确。</span></div>
+  </section>
+
+  <section class="step" id="stepScript">
+    <div class="step-heading"><span class="number">4</span><h2>输入要生成的台词</h2><small>每行一句；空一行会加长停顿</small></div>
+    <textarea class="textarea script" id="scriptText" placeholder="粘贴新的台词……
+
+每行一句。段落之间空一行，会保留更长停顿。"></textarea>
+    <div class="warning">生成时会用整段视频参考音色和口音，并额外突出你选中的原声句来模仿语气。音色克隆效果会受原声清晰度影响。</div>
+    <div class="controls"><button class="button primary" id="generateBtn" type="button" disabled>生成完整音频</button><button class="button danger" id="clearBtn" type="button">清理当前项目</button></div>
+    <div class="progressbox" id="generateProgressBox"><div class="progressrow"><span id="generateProgressMessage">正在处理…</span><span id="generateProgressPercent">0%</span></div><div class="bar"><i id="generateProgressBar"></i></div><div class="error" id="generateProgressError"></div></div>
+    <div class="generated" id="generatedLines"></div>
+    <div class="full-audio hidden" id="fullAudio"><h3>完整 MP3 试听</h3><audio id="finalPlayer" controls></audio><br><a id="downloadLink" href="#" download>下载 MP3</a><span class="status-note" id="outputName"></span></div>
+  </section>
+  <p class="foot">音视频和识别文字都保存在本机；首次下载模型需要联网。启动后仅本机浏览器可访问。</p>
+</main>
+<script>
+const $ = (id) => document.getElementById(id);
+let jobId = null, duration = 0, alignments = [], rangeStart = 0, rangeEnd = 0, activeHandle = null, generatedLines = [];
+const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
+function fmt(seconds){seconds=Math.max(0,Number(seconds)||0);const m=Math.floor(seconds/60),s=seconds%60;return `${String(m).padStart(2,'0')}:${s.toFixed(1).padStart(4,'0')}`;}
+function errText(e){return (e && e.message) ? e.message : String(e);}
+function setRange(start,end){if(!duration)return;rangeStart=Math.max(0,Math.min(Number(start),duration));rangeEnd=Math.max(rangeStart+.15,Math.min(Number(end),duration));if(rangeEnd>duration)rangeStart=Math.max(0,duration-.15);$('startInput').value=rangeStart.toFixed(1);$('endInput').value=rangeEnd.toFixed(1);$('startLabel').textContent=fmt(rangeStart);$('endLabel').textContent=fmt(rangeEnd);const left=rangeStart/duration*100,right=rangeEnd/duration*100;$('startHandle').style.left=left+'%';$('endHandle').style.left=right+'%';$('selection').style.left=left+'%';$('selection').style.width=(right-left)+'%';syncReferencePhrase();}
+function updatePlayhead(){if(duration)$('playhead').style.left=(($('video').currentTime/duration)*100)+'%';}
+$('video').addEventListener('timeupdate',updatePlayhead);
+$('startInput').addEventListener('change',()=>setRange(Number($('startInput').value),rangeEnd));
+$('endInput').addEventListener('change',()=>setRange(rangeStart,Number($('endInput').value)));
+$('setStartBtn').addEventListener('click',()=>setRange($('video').currentTime,rangeEnd));
+$('setEndBtn').addEventListener('click',()=>setRange(rangeStart,$('video').currentTime));
+const timeline=$('timeline');
+timeline.addEventListener('pointerdown',e=>{const isStart=e.target===$('startHandle'),isEnd=e.target===$('endHandle');if(isStart||isEnd){activeHandle=isStart?'start':'end';e.target.setPointerCapture(e.pointerId);e.preventDefault();}else{const t=pointerTime(e);activeHandle=Math.abs(t-rangeStart)<Math.abs(t-rangeEnd)?'start':'end';moveHandle(t);}});
+timeline.addEventListener('pointermove',e=>{if(activeHandle)moveHandle(pointerTime(e));});
+timeline.addEventListener('pointerup',()=>activeHandle=null);timeline.addEventListener('pointercancel',()=>activeHandle=null);
+function pointerTime(e){const r=timeline.getBoundingClientRect();return Math.max(0,Math.min(1,(e.clientX-r.left)/r.width))*duration;}
+function moveHandle(t){if(activeHandle==='start')setRange(Math.min(t,rangeEnd-.15),rangeEnd);else if(activeHandle==='end')setRange(rangeStart,Math.max(t,rangeStart+.15));}
+function syncReferencePhrase(){if(!alignments.length||!duration)return;const selected=alignments.filter(x=>x.end>rangeStart&&x.start<rangeEnd).map(x=>x.text).join('');if(selected.trim())$('referenceText').value=selected.trim();saveDraft();}
+$('syncPhraseBtn').addEventListener('click',syncReferencePhrase);
+
+function saveDraft(){if(!jobId)return;try{localStorage.setItem(`taiCiDraft_${jobId}`,JSON.stringify({reference_start:rangeStart,reference_end:rangeEnd,transcript_text:$('transcriptText').value,reference_text:$('referenceText').value,script_text:$('scriptText').value}));}catch{}}
+for(const id of ['transcriptText','referenceText','scriptText'])$(id).addEventListener('input',saveDraft);
+
+const drop=$('dropzone'),fileInput=$('videoFile');drop.addEventListener('click',()=>fileInput.click());
+for(const event of ['dragenter','dragover'])drop.addEventListener(event,e=>{e.preventDefault();drop.classList.add('drag');});
+for(const event of ['dragleave','drop'])drop.addEventListener(event,e=>{e.preventDefault();drop.classList.remove('drag');});
+drop.addEventListener('drop',e=>{const f=e.dataTransfer.files[0];if(f)uploadFile(f);});fileInput.addEventListener('change',()=>{if(fileInput.files[0])uploadFile(fileInput.files[0]);});
+async function uploadFile(file){$('uploadStatus').textContent='正在导入视频并提取原声…';$('stepReference').classList.add('hidden');$('stepTranscript').classList.add('hidden');$('generateBtn').disabled=true;try{const form=new FormData();form.append('file',file);const data=await api('/api/upload',{method:'POST',body:form});jobId=data.job_id;localStorage.setItem('taiCiJobId',jobId);duration=data.duration;alignments=[];$('uploadStatus').textContent=`已导入：${data.source_name}（${fmt(duration)}）`;$('stepReference').classList.remove('hidden');$('video').src=data.video_url;$('video').load();setRange(0,Math.min(4,duration));$('stepTranscript').classList.remove('hidden');$('generatedLines').innerHTML='';$('fullAudio').classList.add('hidden');$('scriptText').value='';$('transcriptText').value='';$('referenceText').value='';$('generateBtn').disabled=false;saveDraft();}catch(e){$('uploadStatus').textContent='导入失败：'+errText(e);}}
+async function api(url,options={}){const response=await fetch(url,options);let data={};try{data=await response.json();}catch{}if(!response.ok)throw new Error(data.detail||`请求失败（${response.status}）`);return data;}
+$('transcribeBtn').addEventListener('click',async()=>{if(!jobId)return;clearProgress('transcription');$('progressBox').style.display='block';$('transcribeBtn').disabled=true;try{const data=await api('/api/transcribe',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({job_id:jobId})});if(data.status==='already_done'){await restoreJob(jobId);$('transcribeBtn').disabled=false;return;}const result=await waitTask(data.task_id,'transcription');alignments=result.alignments||[];$('transcriptText').value=result.transcript_text||'';$('stepTranscript').classList.remove('hidden');if(!alignments.length)$('alignInfo').textContent='没有获得自动时间标记；仍可拖选时间范围，并手动填写参考句。';else{$('alignInfo').textContent=`已识别 ${alignments.length} 个时间片段，拖选后会自动提取对应原话。`;syncReferencePhrase();}$('transcribeBtn').disabled=false;$('generateBtn').disabled=false;saveDraft();}catch(e){setTaskError('transcription',errText(e));$('stepTranscript').classList.remove('hidden');$('transcribeBtn').disabled=false;}});
+const progressIds={transcription:{message:'progressMessage',percent:'progressPercent',bar:'progressBar',error:'progressError'},generation:{message:'generateProgressMessage',percent:'generateProgressPercent',bar:'generateProgressBar',error:'generateProgressError'}};
+function clearProgress(kind){const p=progressIds[kind];$(p.error).textContent='';$(p.bar).style.width='0%';$(p.percent).textContent='0%';}
+function setTaskError(kind,text){const p=progressIds[kind];$(p.error).textContent=text;$(p.message).textContent='处理失败';}
+async function waitTask(id,kind){const p=progressIds[kind];while(true){const t=await api(`/api/tasks/${id}`);$(p.message).textContent=t.message||'正在处理…';$(p.percent).textContent=`${t.progress||0}%`;$(p.bar).style.width=`${t.progress||0}%`;if(t.status==='error')throw new Error(t.error||'处理失败');if(t.status==='complete')return t.result||{};await sleep(900);}}
+$('generateBtn').addEventListener('click',async()=>{if(!jobId)return alert('请先选择视频。');if(!$('transcriptText').value.trim())return alert('请先识别或填写原视频台词。');if(!$('referenceText').value.trim())return alert('请校对所选参考句的原话。');if(!$('scriptText').value.trim())return alert('请填写要生成的台词。');$('generateProgressBox').style.display='block';clearProgress('generation');$('generateBtn').disabled=true;try{const body={job_id:jobId,transcript_text:$('transcriptText').value,reference_start:rangeStart,reference_end:rangeEnd,reference_text:$('referenceText').value,script_text:$('scriptText').value};const task=await api('/api/generate',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});const result=await waitTask(task.task_id,'generation');generatedLines=result.lines||[];renderLines();showAudio(result.audio_url,result.filename);$('generateBtn').disabled=false;}catch(e){setTaskError('generation',errText(e));$('generateBtn').disabled=false;}});
+function renderLines(){const root=$('generatedLines');root.innerHTML='';generatedLines.forEach((text,index)=>{const card=document.createElement('div');card.className='line-card';const top=document.createElement('div');top.className='line-card-top';const n=document.createElement('span');n.className='line-index';n.textContent=`${String(index+1).padStart(2,'0')}`;const input=document.createElement('input');input.className='line-text';input.value=text;input.setAttribute('aria-label',`第 ${index+1} 句台词`);const btn=document.createElement('button');btn.className='button subtle';btn.textContent='单独重做';btn.addEventListener('click',()=>regenerateLine(index,input,btn));const audio=document.createElement('audio');audio.controls=true;audio.preload='none';audio.src=`/api/jobs/${jobId}/segments/${index}?v=${Date.now()}`;top.append(n,input,btn);card.append(top,audio);root.append(card);});}
+async function regenerateLine(index,input,btn){const text=input.value.trim();if(!text)return alert('请先填写这句台词。');btn.disabled=true;btn.textContent='正在重做…';$('generateProgressBox').style.display='block';clearProgress('generation');try{const task=await api('/api/regenerate',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({job_id:jobId,line_index:index,text})});const result=await waitTask(task.task_id,'generation');generatedLines[index]=text;const card=btn.closest('.line-card');card.querySelector('audio').src=result.segment_url+`?v=${Date.now()}`;showAudio(result.audio_url,result.filename);btn.textContent='单独重做';}catch(e){setTaskError('generation',errText(e));btn.textContent='重试此句';}finally{btn.disabled=false;}}
+function showAudio(url,filename){$('fullAudio').classList.remove('hidden');$('finalPlayer').src=url+`?v=${Date.now()}`;$('downloadLink').href=`/api/jobs/${jobId}/download`;$('downloadLink').download=filename||'台词配音.mp3';$('outputName').textContent=filename?`　已保存：${filename}`:'';}
+$('clearBtn').addEventListener('click',async()=>{if(!jobId)return; if(!confirm('清理当前项目会删除导入的视频、临时音频和本次 MP3。确定继续吗？'))return;try{await api(`/api/jobs/${jobId}`,{method:'DELETE'});localStorage.removeItem('taiCiJobId');jobId=null;duration=0;alignments=[];$('video').removeAttribute('src');$('video').load();$('stepReference').classList.add('hidden');$('stepTranscript').classList.add('hidden');$('uploadStatus').textContent='当前项目已清理。';$('transcriptText').value='';$('referenceText').value='';$('scriptText').value='';$('generatedLines').innerHTML='';$('fullAudio').classList.add('hidden');$('generateBtn').disabled=true;}catch(e){alert(errText(e));}});
+async function restoreJob(id){try{const data=await api(`/api/jobs/${id}/state`);let draft=null;try{draft=JSON.parse(localStorage.getItem(`taiCiDraft_${id}`)||'null');}catch{}jobId=id;duration=data.duration;alignments=data.alignments||[];$('uploadStatus').textContent=`已恢复：${data.source_name}（${fmt(duration)}）`;$('stepReference').classList.remove('hidden');$('video').src=data.video_url;$('video').load();setRange(data.reference_start??0,data.reference_end??Math.min(4,duration));$('transcriptText').value=data.transcript_text||'';$('referenceText').value=data.reference_text||'';$('stepTranscript').classList.remove('hidden');if(draft){setRange(draft.reference_start??rangeStart,draft.reference_end??rangeEnd);$('transcriptText').value=draft.transcript_text??$('transcriptText').value;$('referenceText').value=draft.reference_text??$('referenceText').value;$('scriptText').value=draft.script_text??'';}else if(!$('referenceText').value.trim())syncReferencePhrase();if(data.lines&&data.lines.length){generatedLines=data.lines;renderLines();if(data.audio_ready)showAudio(data.audio_url,data.filename);} $('generateBtn').disabled=!$('transcriptText').value.trim();saveDraft();}catch{localStorage.removeItem('taiCiJobId');}}
+window.addEventListener('DOMContentLoaded',async()=>{try{const recent=await api('/api/jobs/recent');if(recent.job_id)restoreJob(recent.job_id);}catch{}});
+</script>
+</body>
+</html>
