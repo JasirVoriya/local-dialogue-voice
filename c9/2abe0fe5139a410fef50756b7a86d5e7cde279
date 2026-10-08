@@ -1,0 +1,33 @@
+.gitignore
+  s_42d1aaf8560e2f::t_7369bab42002d8 1-9
+README.md
+  s_42d1aaf8560e2f::t_aee2814c449dc0 1-26
+app.py
+  s_42d1aaf8560e2f::t_b3010b9fe5676a 1-646
+asr/pyproject.toml
+  s_42d1aaf8560e2f::t_4f9a439ceaf8cb 1-9
+asr/uv.lock
+  s_42d1aaf8560e2f::t_cfcea0044131f3 1-1729
+pyproject.toml
+  s_42d1aaf8560e2f::t_489684f2da0c95 1-12
+uv.lock
+  s_42d1aaf8560e2f::t_f973ed81d96e51 1-1635
+web/index.html
+  s_42d1aaf8560e2f::t_fe3ad91d6a6793 1-111
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "c92abe0fe5139a410fef50756b7a86d5e7cde279",
+  "prompts": {},
+  "sessions": {
+    "s_42d1aaf8560e2f": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a10512-ce73-7763-9855-7347b7951a73",
+        "model": "gpt-6-luna"
+      },
+      "human_author": "JasirVoriya <jasirvoriya@gmail.com>"
+    }
+  }
+}
