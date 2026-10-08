@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1120" height="680" viewBox="0 0 1120 680" role="img" aria-labelledby="title desc">
+  <title id="title">参考句选择界面示意</title>
+  <desc id="desc">导入视频后预览画面，在绿色时间轴选取一段声音，确认或编辑自动提取的原话。</desc>
+  <rect width="1120" height="680" rx="24" fill="#f3f6f3"/><rect x="28" y="24" width="1064" height="632" rx="20" fill="#fff" stroke="#dfe7e1"/>
+  <g font-family="Arial, sans-serif">
+    <circle cx="67" cy="67" r="20" fill="#256c4a"/><text x="67" y="74" text-anchor="middle" font-size="19" font-weight="700" fill="#fff">2</text><text x="102" y="74" font-size="26" font-weight="700" fill="#20382a">选原声参考句</text><text x="1035" y="72" text-anchor="end" font-size="15" fill="#78857b">拖动两侧把手调整范围</text>
+    <rect x="54" y="108" width="1012" height="275" rx="16" fill="#24372e"/><path d="M55 292 228 193l168 81 161-106 166 105 177-127 165 76v160H55Z" fill="#3c594a" opacity=".78"/><path d="M55 334 250 262l159 44 194-93 182 83 280-106v108H55Z" fill="#4c6a58" opacity=".82"/><circle cx="560" cy="245" r="35" fill="#fff" opacity=".9"/><path d="M551 225v40l31-20Z" fill="#286b49"/><text x="560" y="360" text-anchor="middle" font-size="14" fill="#eaf0ec">参考视频预览（示意画面）</text>
+    <text x="56" y="422" font-size="16" font-weight="700" fill="#536258">参考句范围</text><text x="1064" y="422" text-anchor="end" font-size="17" font-weight="700" fill="#425249">00:08.6 — 00:12.2</text><rect x="56" y="447" width="1008" height="26" rx="13" fill="#e7ede8"/><rect x="213" y="447" width="190" height="26" rx="13" fill="#6db184"/><rect x="204" y="440" width="18" height="40" rx="8" fill="#176344" stroke="#fff" stroke-width="3"/><rect x="394" y="440" width="18" height="40" rx="8" fill="#176344" stroke="#fff" stroke-width="3"/>
+    <text x="56" y="511" font-size="14" fill="#728077">拖动绿色两端，或填写起止秒数。自动提取文字后请核对它与所选声音是否一致。</text>
+    <rect x="56" y="532" width="213" height="44" rx="10" fill="#fbfcfb" stroke="#d9e2dc"/><text x="72" y="550" font-size="12" fill="#7a877e">起始时间（秒）</text><text x="72" y="568" font-size="16" font-weight="700" fill="#2e3d33">8.6</text>
+    <rect x="284" y="532" width="213" height="44" rx="10" fill="#fbfcfb" stroke="#d9e2dc"/><text x="300" y="550" font-size="12" fill="#7a877e">结束时间（秒）</text><text x="300" y="568" font-size="16" font-weight="700" fill="#2e3d33">12.2</text>
+    <rect x="56" y="593" width="1008" height="42" rx="10" fill="#f5f9f6" stroke="#d9e2dc"/><text x="72" y="610" font-size="12" fill="#7a877e">所选参考句原话（可修改）</text><text x="72" y="628" font-size="15" fill="#2c3d32">例如：我们下次再来这里看看。</text>
+  </g>
+</svg>
