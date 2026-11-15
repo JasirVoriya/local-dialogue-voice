@@ -150,3 +150,5 @@ RUN_BROWSER_TESTS=1 CHROMIUM_EXECUTABLE_PATH=/path/to/chromium uv run --no-sync 
 ```
 
 默认跳过浏览器测试；必须在允许 Chromium 进程的环境开启。GitHub Actions 安装 FFmpeg，执行无模型测试和可选浏览器烟测。已知当前环境的 Starlette TestClient 会产生 httpx 兼容性弃用警告，不影响测试结果。
+
+本次本地无模型测试 29 项通过；真实 Chromium 烟测已在 [GitHub Actions](https://github.com/JasirVoriya/local-dialogue-voice/actions/runs/43686802780) 单独执行，1 项通过。真实 Mac 模型推理和真人听感仍待验证。

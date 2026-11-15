@@ -4,7 +4,7 @@
 
 ## 结果与覆盖
 
-最终本地结果：**29 项 Python 测试通过、1 项真实浏览器测试跳过**；Python suite 内还执行 4 项 Node 编辑器行为测试，单独运行同样 4/4 通过。JS 语法、基础 Python lint、编译和 diff 空白检查通过。TestClient 有 1 项已注明的弃用警告。
+最终本地结果：**29 项 Python 测试通过、1 项真实浏览器测试跳过**；后续在 [GitHub Actions](https://github.com/JasirVoriya/local-dialogue-voice/actions/runs/43686802780) 的实际 Chromium 环境中，浏览器烟测 **1 项通过**。Python suite 内还执行 4 项 Node 编辑器行为测试，单独运行同样 4/4 通过。JS 语法、基础 Python lint、编译和 diff 空白检查通过。TestClient 有 1 项已注明的弃用警告。
 
 执行：
 
@@ -38,7 +38,7 @@ git diff --check
 
 保留 `tests/test_browser.py`，通过 `RUN_BROWSER_TESTS=1` 显式执行。测试会用实际 Chromium 操作编辑、选中单句生成、重新打开恢复、导出、切换模式及窄屏布局；模型仍用替身。
 
-本次尝试启动 Chromium 时，操作系统在创建进程单实例 socket 时拒绝权限（`Operation not permitted`）。可用桌面浏览器属于另一运行环境，访问本地测试服务返回 `ERR_CONNECTION_REFUSED`。因此浏览器测试在默认 suite 中 **跳过，未计为通过**。GitHub Actions 配置会安装 Playwright Chromium 再执行，远端 CI 的真实状态以 PR 检查为准，不能由本地跳过推定。
+本次尝试启动 Chromium 时，操作系统在创建进程单实例 socket 时拒绝权限（`Operation not permitted`）。可用桌面浏览器属于另一运行环境，访问本地测试服务返回 `ERR_CONNECTION_REFUSED`。因此浏览器测试在本地默认 suite 中 **跳过，未计为通过**。随后在 GitHub Actions 安装 Playwright Chromium，已实际执行并通过（`1 passed`，job 132728871800，run 43686802780）。该烟测覆盖第二句编辑与独立生成、刷新恢复、导出下载、模式切换和窄屏无横向溢出；模型仍使用替身。所有 CI 步骤均成功，不能由此推定 Mac 或真实模型听感。
 
 ## 真实模型 / 听感限制
 
