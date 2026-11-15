@@ -1,0 +1,25 @@
+name: Model-free regression tests
+on:
+  pull_request:
+  push:
+    branches: [main, 'feature/**']
+permissions:
+  contents: read
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          python-version: '3.12'
+          enable-cache: true
+      - run: sudo apt-get update && sudo apt-get install -y ffmpeg
+      - run: uv sync --locked --only-group test
+      - run: uv run --no-sync python -m pytest -q
+      - run: node --check web/timeline.js
+      - name: Optional real browser smoke test
+        run: |
+          uv pip install playwright
+          uv run --no-sync python -m playwright install --with-deps chromium
+          CHROMIUM_EXECUTABLE_PATH=$(uv run --no-sync python -c "from playwright.sync_api import sync_playwright; p=sync_playwright().start(); print(p.chromium.executable_path)") RUN_BROWSER_TESTS=1 uv run --no-sync python -m pytest tests/test_browser.py -q
