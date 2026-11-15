@@ -7,3 +7,21 @@ __pycache__/
 # Generated media must stay out of the public source repository.
 outputs/*
 !outputs/.gitkeep
+
+# Tests, local model files, and imported/generated recordings.
+.pytest_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+.superpowers/
+models/
+checkpoints/
+jobs/
+caches/
+*.wav
+*.mp3
+*.mp4
+*.mov
+*.mkv
+*.safetensors
+*.pt

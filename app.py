@@ -1,10 +1,8 @@
 from __future__ import annotations
 
 import asyncio
-import gc
 import json
 import mimetypes
-import os
 import re
 import shutil
 import socket
@@ -15,6 +13,7 @@ import time
 import traceback
 import uuid
 import webbrowser
+from contextlib import contextmanager
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -22,11 +21,17 @@ from urllib.parse import urlparse
 
 import numpy as np
 import soundfile as sf
-import torch
 import uvicorn
 from fastapi import FastAPI, File, HTTPException, UploadFile
+from fastapi.exceptions import RequestValidationError
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
-from pydantic import BaseModel, Field
+from fastapi.staticfiles import StaticFiles
+from pydantic import BaseModel, ConfigDict, Field
+
+from timeline.api import register_routes
+from timeline.models import migrate_job, segments_from_alignments
+from tts.reference import PromptCache, crop_reference, reference_key
+from tts.registry import create_backend
 
 APP_DIR = Path(__file__).resolve().parent
 WEB_DIR = APP_DIR / "web"
@@ -45,12 +50,13 @@ ALLOWED_VIDEO_SUFFIXES = {".mp4", ".mov", ".m4v", ".mkv", ".webm"}
 MAX_UPLOAD_BYTES = 2 * 1024 * 1024 * 1024
 
 app = FastAPI(title="本机台词配音工具", docs_url=None, redoc_url=None)
+app.mount("/web", StaticFiles(directory=WEB_DIR), name="web")
 TASKS: dict[str, dict[str, Any]] = {}
 TASKS_LOCK = threading.Lock()
 MODEL_LOCK = threading.RLock()
 ACTIVE_TASK_ID: str | None = None
-_TTS_MODEL = None
-_PROMPTS: dict[str, Any] = {}
+_TTS_BACKEND = None
+PROMPT_CACHE = PromptCache()
 
 
 @app.middleware("http")
@@ -62,23 +68,53 @@ async def restrict_to_localhost(request, call_next):
     if origin:
         origin_host = urlparse(origin).hostname
         if origin_host not in {"127.0.0.1", "localhost"}:
-            return JSONResponse({"detail": "只允许从本机页面访问此工具。"}, status_code=403)
+            return JSONResponse(
+                {"detail": "只允许从本机页面访问此工具。"}, status_code=403
+            )
     return await call_next(request)
 
 
+@app.exception_handler(RequestValidationError)
+async def invalid_input(request, exc):
+    labels = {
+        "start": "片段开始时间",
+        "end": "片段结束时间",
+        "reference_start": "参考开始时间",
+        "reference_end": "参考结束时间",
+        "reference_text": "参考原话",
+        "target_text": "新台词",
+        "custom_duration": "自定义时长",
+        "script_text": "自由台词",
+        "segment_ids": "所选片段",
+    }
+    fields = []
+    for error in exc.errors():
+        key = str(error["loc"][-1]) if error["loc"] else ""
+        fields.append(labels.get(key, "填写的字段"))
+    return JSONResponse(
+        {
+            "detail": "输入参数不正确，请检查"
+            + "、".join(dict.fromkeys(fields))
+            + "的范围、类型或文本长度。"
+        },
+        status_code=422,
+    )
+
+
 class GenerateRequest(BaseModel):
+    model_config = ConfigDict(allow_inf_nan=False, extra="forbid")
     job_id: str
     transcript_text: str = ""
     reference_start: float = Field(ge=0)
     reference_end: float = Field(gt=0)
     reference_text: str = ""
-    script_text: str
+    script_text: str = Field(min_length=1, max_length=24000)
 
 
 class RegenerateRequest(BaseModel):
     job_id: str
     line_index: int = Field(ge=0)
-    text: str
+    text: str = Field(min_length=1, max_length=4000)
 
 
 class DeleteRequest(BaseModel):
@@ -100,7 +136,16 @@ def _read_job(job_id: str) -> dict[str, Any]:
     path = _job_dir(job_id) / "project.json"
     if not path.is_file():
         raise HTTPException(status_code=404, detail="项目资料不完整，请重新导入视频。")
-    return json.loads(path.read_text(encoding="utf-8"))
+    job = json.loads(path.read_text(encoding="utf-8"))
+    needs_migration = "dialogue_segments" not in job
+    migrate_job(job)
+    if ACTIVE_TASK_ID is None:
+        for segment in job["dialogue_segments"]:
+            if segment.get("status") == "generating":
+                segment.update(status="error", error="上次生成已中断，请重新生成本句。")
+    if needs_migration:
+        _write_job(job)
+    return job
 
 
 def _write_job(job: dict[str, Any]) -> None:
@@ -110,11 +155,19 @@ def _write_job(job: dict[str, Any]) -> None:
     temp.replace(d / "project.json")
 
 
-def _set_task(task_id: str, *, progress: int | None = None, message: str | None = None,
-              status: str | None = None, result: dict[str, Any] | None = None,
-              error: str | None = None) -> None:
+def _set_task(
+    task_id: str,
+    *,
+    progress: int | None = None,
+    message: str | None = None,
+    status: str | None = None,
+    result: dict[str, Any] | None = None,
+    error: str | None = None,
+) -> None:
     with TASKS_LOCK:
-        task = TASKS.setdefault(task_id, {"status": "running", "progress": 0, "message": "正在准备…"})
+        task = TASKS.setdefault(
+            task_id, {"status": "running", "progress": 0, "message": "正在准备…"}
+        )
         if progress is not None:
             task["progress"] = max(0, min(100, progress))
         if message is not None:
@@ -131,27 +184,53 @@ def _claim_task(task_id: str) -> None:
     global ACTIVE_TASK_ID
     with TASKS_LOCK:
         if ACTIVE_TASK_ID is not None:
-            raise HTTPException(status_code=409, detail="当前有任务正在运行，请等它完成后再试。")
+            raise HTTPException(
+                status_code=409, detail="当前有任务正在运行，请等它完成后再试。"
+            )
         ACTIVE_TASK_ID = task_id
+        while len(TASKS) >= 100:
+            completed = next(
+                (k for k, v in TASKS.items() if v["status"] != "running"), None
+            )
+            if completed is None:
+                break
+            del TASKS[completed]
         TASKS[task_id] = {"status": "running", "progress": 1, "message": "任务已排队…"}
 
 
 def _start_task(task_id: str, func, *args) -> None:
+    with TASKS_LOCK:
+        first = args[0] if args else None
+        TASKS[task_id]["job_id"] = getattr(
+            first, "job_id", first if isinstance(first, str) else None
+        )
+
     def runner() -> None:
         global ACTIVE_TASK_ID
         try:
             result = func(task_id, *args)
-            _set_task(task_id, status="complete", progress=100, message="完成。", result=result)
+            _set_task(
+                task_id,
+                status="complete",
+                progress=100,
+                message="完成。",
+                result=result,
+            )
         except Exception as exc:
             traceback.print_exc()
-            _set_task(task_id, status="error", message="处理失败。", error=str(exc)[:800])
+            _set_task(
+                task_id, status="error", message="处理失败。", error=str(exc)[:800]
+            )
         finally:
             with TASKS_LOCK:
                 ACTIVE_TASK_ID = None
+
     threading.Thread(target=runner, name=f"task-{task_id[:8]}", daemon=True).start()
 
 
-def _safe_model_download(model_id: str, dest: Path, task_id: str, label: str, progress: int) -> None:
+def _safe_model_download(
+    model_id: str, dest: Path, task_id: str, label: str, progress: int
+) -> None:
     marker = dest / ".download-complete"
     if marker.is_file():
         return
@@ -163,12 +242,18 @@ def _safe_model_download(model_id: str, dest: Path, task_id: str, label: str, pr
             exe = Path(found)
     if not exe.exists():
         raise RuntimeError("找不到 ModelScope 下载程序。请重新运行启动器安装依赖。")
-    _set_task(task_id, progress=progress, message=f"首次使用：正在下载{label}，请保持页面和电脑开启…")
+    _set_task(
+        task_id,
+        progress=progress,
+        message=f"首次使用：正在下载{label}，请保持页面和电脑开启…",
+    )
     log_path = APP_DATA / "last-model-download.log"
     with log_path.open("w", encoding="utf-8") as log:
         proc = subprocess.run(
             [str(exe), "download", "--model", model_id, "--local_dir", str(dest)],
-            stdout=log, stderr=subprocess.STDOUT, text=True,
+            stdout=log,
+            stderr=subprocess.STDOUT,
+            text=True,
         )
     if proc.returncode != 0:
         tail = log_path.read_text(encoding="utf-8", errors="replace")[-1200:]
@@ -177,51 +262,118 @@ def _safe_model_download(model_id: str, dest: Path, task_id: str, label: str, pr
 
 
 def _unload_tts() -> None:
-    global _TTS_MODEL
-    if _TTS_MODEL is not None:
-        _TTS_MODEL = None
-        _PROMPTS.clear()
-        gc.collect()
-        if torch.backends.mps.is_available():
-            torch.mps.empty_cache()
-
-
-def _get_tts_model(task_id: str):
-    global _TTS_MODEL
+    global _TTS_BACKEND
     with MODEL_LOCK:
-        if _TTS_MODEL is not None:
-            return _TTS_MODEL
-        _safe_model_download(TTS_MODEL_ID, TTS_MODEL_DIR, task_id, "声音生成模型", 5)
-        _set_task(task_id, progress=18, message="正在加载本机声音生成模型…")
-        from qwen_tts import Qwen3TTSModel
-
-        device = "mps" if torch.backends.mps.is_available() else "cpu"
-        _TTS_MODEL = Qwen3TTSModel.from_pretrained(
-            str(TTS_MODEL_DIR), device_map=device, dtype=torch.float32,
-            attn_implementation="eager",
-        )
-        return _TTS_MODEL
+        PROMPT_CACHE.clear()
+        if _TTS_BACKEND is not None:
+            _TTS_BACKEND.unload()
+            _TTS_BACKEND = None
 
 
-def _extract_audio(video_path: Path, job_dir: Path, task_id: str) -> tuple[Path, Path, float]:
+def _get_tts_backend(task_id: str):
+    global _TTS_BACKEND
+    with MODEL_LOCK:
+        if _TTS_BACKEND is None:
+            _safe_model_download(
+                TTS_MODEL_ID, TTS_MODEL_DIR, task_id, "声音生成模型", 5
+            )
+            _set_task(task_id, progress=18, message="正在加载本机声音生成模型…")
+            _TTS_BACKEND = create_backend(
+                "qwen3", model_dir=TTS_MODEL_DIR, model_id=TTS_MODEL_ID
+            )
+        return _TTS_BACKEND.load()
+
+
+@contextmanager
+def _mutation_guard():
+    with TASKS_LOCK:
+        if ACTIVE_TASK_ID:
+            raise HTTPException(
+                status_code=409, detail="当前有任务正在运行，请完成后再修改项目。"
+            )
+        yield
+
+
+def _extract_audio(
+    video_path: Path, job_dir: Path, task_id: str
+) -> tuple[Path, Path, float]:
     if task_id != "upload":
         _set_task(task_id, progress=4, message="正在读取视频并提取原声…")
     duration_result = subprocess.run(
-        ["ffprobe", "-v", "error", "-show_entries", "format=duration", "-of", "default=nw=1:nk=1", str(video_path)],
-        capture_output=True, text=True,
+        [
+            "ffprobe",
+            "-v",
+            "error",
+            "-show_entries",
+            "format=duration",
+            "-of",
+            "default=nw=1:nk=1",
+            str(video_path),
+        ],
+        capture_output=True,
+        text=True,
     )
     if duration_result.returncode != 0:
         raise RuntimeError("无法读取视频时长，请确认视频文件正常。")
     duration = float(duration_result.stdout.strip())
     asr_path = job_dir / "source_asr.wav"
     tts_path = job_dir / "source_tts.wav"
-    base = ["ffmpeg", "-nostdin", "-hide_banner", "-loglevel", "error", "-y", "-i", str(video_path), "-vn"]
-    first = subprocess.run(base + ["-ac", "1", "-ar", "16000", "-c:a", "pcm_s16le", str(asr_path)], capture_output=True, text=True)
-    if first.returncode != 0 or not asr_path.is_file() or asr_path.stat().st_size < 1024:
+    base = [
+        "ffmpeg",
+        "-nostdin",
+        "-hide_banner",
+        "-loglevel",
+        "error",
+        "-y",
+        "-i",
+        str(video_path),
+        "-vn",
+    ]
+    first = subprocess.run(
+        base + ["-ac", "1", "-ar", "16000", "-c:a", "pcm_s16le", str(asr_path)],
+        capture_output=True,
+        text=True,
+    )
+    if (
+        first.returncode != 0
+        or not asr_path.is_file()
+        or asr_path.stat().st_size < 1024
+    ):
         raise RuntimeError("视频中没有可读取的音轨。")
-    second = subprocess.run(base + ["-ac", "1", "-ar", "24000", "-af", "highpass=f=80,lowpass=f=8000", "-c:a", "pcm_s16le", str(tts_path)], capture_output=True, text=True)
+    second = subprocess.run(
+        base
+        + [
+            "-ac",
+            "1",
+            "-ar",
+            "24000",
+            "-af",
+            "highpass=f=80,lowpass=f=8000",
+            "-c:a",
+            "pcm_s16le",
+            str(tts_path),
+        ],
+        capture_output=True,
+        text=True,
+    )
     if second.returncode != 0:
         raise RuntimeError("无法处理视频原声。")
+    mix = subprocess.run(
+        base
+        + [
+            "-ac",
+            "2",
+            "-ar",
+            "24000",
+            "-c:a",
+            "pcm_s16le",
+            str(job_dir / "source_mix.wav"),
+        ],
+        capture_output=True,
+        text=True,
+    )
+    if mix.returncode != 0:
+        raise RuntimeError("无法提取用于原声替换的原始混合音轨。")
     return asr_path, tts_path, duration
 
 
@@ -230,7 +382,9 @@ def _run_transcription(task_id: str, job_id: str) -> dict[str, Any]:
     job_dir = _job_dir(job_id)
     _unload_tts()
     _safe_model_download(ASR_MODEL_ID, ASR_MODEL_DIR, task_id, "转写模型", 5)
-    _safe_model_download(ALIGNER_MODEL_ID, ALIGNER_MODEL_DIR, task_id, "时间对齐模型", 12)
+    _safe_model_download(
+        ALIGNER_MODEL_ID, ALIGNER_MODEL_DIR, task_id, "时间对齐模型", 12
+    )
     _set_task(task_id, progress=24, message="正在加载本机转写模型并识别原声…")
     worker = APP_DIR / "asr" / "worker.py"
     python = APP_DIR / "asr" / ".venv" / "bin" / "python"
@@ -238,10 +392,23 @@ def _run_transcription(task_id: str, job_id: str) -> dict[str, Any]:
         raise RuntimeError("转写环境尚未安装。请退出工具后重新双击启动.command。")
     output_path = job_dir / "asr_result.json"
     proc = subprocess.run(
-        [str(python), str(worker), "--audio", str(job_dir / "source_asr.wav"),
-         "--asr-model", str(ASR_MODEL_DIR), "--aligner-model", str(ALIGNER_MODEL_DIR),
-         "--duration", str(job["duration"]), "--output", str(output_path)],
-        capture_output=True, text=True, timeout=60 * 60,
+        [
+            str(python),
+            str(worker),
+            "--audio",
+            str(job_dir / "source_asr.wav"),
+            "--asr-model",
+            str(ASR_MODEL_DIR),
+            "--aligner-model",
+            str(ALIGNER_MODEL_DIR),
+            "--duration",
+            str(job["duration"]),
+            "--output",
+            str(output_path),
+        ],
+        capture_output=True,
+        text=True,
+        timeout=60 * 60,
     )
     if proc.returncode != 0 or not output_path.is_file():
         details = (proc.stderr or proc.stdout or "").strip()[-1600:]
@@ -255,8 +422,18 @@ def _run_transcription(task_id: str, job_id: str) -> dict[str, Any]:
     job["alignments"] = alignments
     job["alignment_available"] = bool(data.get("alignment_available", alignments))
     job["transcribed"] = True
+    if not job.get("dialogue_segments"):
+        job["dialogue_segments"] = [
+            s.model_dump()
+            for s in segments_from_alignments(alignments, job["duration"])
+        ]
     _write_job(job)
-    return {"job_id": job_id, "transcript_text": transcript, "alignments": alignments, "duration": job["duration"]}
+    return {
+        "job_id": job_id,
+        "transcript_text": transcript,
+        "alignments": alignments,
+        "duration": job["duration"],
+    }
 
 
 def _parse_script(script: str) -> tuple[list[str], list[float]]:
@@ -277,58 +454,52 @@ def _parse_script(script: str) -> tuple[list[str], list[float]]:
     return lines, gaps
 
 
-def _make_reference(job: dict[str, Any], job_dir: Path, start: float, end: float,
-                    transcript_text: str, phrase_text: str) -> tuple[Path, str]:
-    duration = float(job["duration"])
-    if end <= start or start < 0 or end > duration + 0.05:
-        raise RuntimeError("参考句的起止时间不正确，请重新拖选时间范围。")
-    if end - start < 0.25:
-        raise RuntimeError("参考句太短，请至少选取四分之一秒的原声。")
-    phrase_path = job_dir / "selected_reference.wav"
-    command = [
-        "ffmpeg", "-nostdin", "-hide_banner", "-loglevel", "error", "-y",
-        "-ss", f"{start:.3f}", "-i", str(job_dir / "source_tts.wav"),
-        "-t", f"{end - start:.3f}", "-ac", "1", "-ar", "24000",
-        "-c:a", "pcm_s16le", str(phrase_path),
-    ]
-    proc = subprocess.run(command, capture_output=True, text=True)
-    if proc.returncode != 0:
-        raise RuntimeError("无法截取所选参考句，请重新选择时间范围。")
-    full_audio, sr = sf.read(job_dir / "source_tts.wav", dtype="float32")
-    phrase_audio, phrase_sr = sf.read(phrase_path, dtype="float32")
-    if sr != 24000 or phrase_sr != sr:
-        raise RuntimeError("音频采样率不匹配，请重新导入视频。")
-    joined = np.concatenate((full_audio, np.zeros(round(0.35 * sr), dtype=np.float32), phrase_audio))
-    combined_path = job_dir / "voice_reference.wav"
-    sf.write(combined_path, joined, sr)
-    base_text = transcript_text.strip()
-    if not base_text:
-        raise RuntimeError("原视频转写文字为空，请先转写或手动填写原声文字。")
-    phrase_text = phrase_text.strip()
-    if not phrase_text:
-        raise RuntimeError("请填写选中参考句的原声文字。")
-    combined_text = f"{base_text} {phrase_text}"
-    return combined_path, combined_text
-
-
-def _synthesize_line(model, prompt, text: str, output_path: Path) -> int:
-    wavs, sr = model.generate_voice_clone(
-        text=text,
-        language="Auto",
-        voice_clone_prompt=prompt,
-        non_streaming_mode=True,
-        do_sample=True,
-        temperature=0.8,
-        top_p=0.92,
-        top_k=45,
-        max_new_tokens=max(768, min(2048, len(text) * 24)),
+def _make_reference(
+    job: dict[str, Any],
+    job_dir: Path,
+    start: float,
+    end: float,
+    transcript_text: str,
+    phrase_text: str,
+) -> tuple[Path, str]:
+    # Exactly the chosen phrase. Never concatenate full-video audio or text.
+    if end > float(job["duration"]) + 0.001:
+        raise ValueError("参考范围超出原视频。")
+    ref = crop_reference(
+        job_dir / "source_tts.wav",
+        start,
+        end,
+        phrase_text,
+        job_dir / "selected_reference.wav",
     )
-    audio = np.asarray(wavs[0], dtype=np.float32).reshape(-1)
-    sf.write(output_path, audio, sr)
-    del wavs, audio
-    if torch.backends.mps.is_available():
-        torch.mps.empty_cache()
-    return int(sr)
+    return ref.audio_path, ref.text
+
+
+def _free_prompt(job, job_dir, backend):
+    start, end, text = (
+        job["reference_start"],
+        job["reference_end"],
+        job["reference_text"],
+    )
+    key = reference_key(
+        job_id=job["job_id"],
+        segment_id="free",
+        model=backend.identity,
+        source=job_dir / "source_tts.wav",
+        start=start,
+        end=end,
+        text=text,
+        global_reference=None,
+        options={"x_vector_only_mode": False},
+    )
+    prompt = PROMPT_CACHE.get(key)
+    if prompt is None:
+        audio, text = _make_reference(job, job_dir, start, end, "", text)
+        from tts.base import VoiceReference
+
+        prompt = backend.prepare_reference(VoiceReference(audio, text))
+        PROMPT_CACHE.put(key, prompt, job["job_id"])
+    return prompt
 
 
 def _assemble_mp3(job: dict[str, Any], job_dir: Path) -> Path:
@@ -352,15 +523,38 @@ def _assemble_mp3(job: dict[str, Any], job_dir: Path) -> Path:
     wav_path = job_dir / "complete.wav"
     sf.write(wav_path, joined, sample_rate)
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
-    base = re.sub(r"[^\w\-一-龥]+", "_", Path(job["source_name"]).stem).strip("_") or "台词配音"
+    base = (
+        re.sub(r"[^\w\-一-龥]+", "_", Path(job["source_name"]).stem).strip("_")
+        or "台词配音"
+    )
     if not job.get("output_path"):
-        name = f"{base}_台词配音_{datetime.now().strftime('%Y%m%d_%H%M%S')}.mp3"
+        name = f"{base}_台词配音_{job['job_id']}.mp3"
         job["output_path"] = str(OUTPUT_DIR / name)
     out_path = Path(job["output_path"])
     proc = subprocess.run(
-        ["ffmpeg", "-nostdin", "-hide_banner", "-loglevel", "error", "-y", "-i", str(wav_path),
-         "-af", "loudnorm=I=-16:LRA=11:TP=-1.5", "-ar", "48000", "-ac", "1", "-codec:a", "libmp3lame", "-b:a", "192k", str(out_path)],
-        capture_output=True, text=True,
+        [
+            "ffmpeg",
+            "-nostdin",
+            "-hide_banner",
+            "-loglevel",
+            "error",
+            "-y",
+            "-i",
+            str(wav_path),
+            "-af",
+            "loudnorm=I=-16:LRA=11:TP=-1.5",
+            "-ar",
+            "48000",
+            "-ac",
+            "1",
+            "-codec:a",
+            "libmp3lame",
+            "-b:a",
+            "192k",
+            str(out_path),
+        ],
+        capture_output=True,
+        text=True,
     )
     if proc.returncode != 0:
         raise RuntimeError("合并 MP3 失败：" + proc.stderr[-600:])
@@ -377,36 +571,41 @@ def _run_generate(task_id: str, request: GenerateRequest) -> dict[str, Any]:
         raise RuntimeError("请先填写要生成的台词。")
     if not request.reference_text.strip():
         raise RuntimeError("请填写选中参考句的原声文字。")
-    ref_audio, ref_text = _make_reference(
-        job, job_dir, request.reference_start, request.reference_end,
-        request.transcript_text, request.reference_text,
+    if any(len(line) > 4000 for line in lines):
+        raise ValueError("单句台词不能超过 4000 字。")
+    backend = _get_tts_backend(task_id)
+    job.update(
+        {
+            "transcript_text": request.transcript_text,
+            "reference_start": request.reference_start,
+            "reference_end": request.reference_end,
+            "reference_text": request.reference_text,
+            "lines": lines,
+            "gaps": gaps,
+            "output_path": job.get("output_path"),
+        }
     )
-    model = _get_tts_model(task_id)
-    _set_task(task_id, progress=25, message="正在准备音色、口音和语气参考…")
-    prompt = model.create_voice_clone_prompt(
-        ref_audio=str(ref_audio), ref_text=ref_text, x_vector_only_mode=False,
-    )
-    _PROMPTS[request.job_id] = prompt
-    job.update({
-        "transcript_text": request.transcript_text,
-        "reference_start": request.reference_start,
-        "reference_end": request.reference_end,
-        "reference_text": request.reference_text,
-        "lines": lines,
-        "gaps": gaps,
-        "output_path": job.get("output_path"),
-    })
     _write_job(job)
+    prompt = _free_prompt(job, job_dir, backend)
     sr = 24000
     for i, line in enumerate(lines):
-        _set_task(task_id, progress=30 + int(i / max(1, len(lines)) * 60),
-                  message=f"正在生成第 {i + 1}/{len(lines)} 句…")
-        sr = _synthesize_line(model, prompt, line, job_dir / f"segment_{i:03d}.wav")
+        _set_task(
+            task_id,
+            progress=30 + int(i / max(1, len(lines)) * 60),
+            message=f"正在生成第 {i + 1}/{len(lines)} 句…",
+        )
+        sr = backend.synthesize(line, prompt, job_dir / f"segment_{i:03d}.wav")
     out = _assemble_mp3(job, job_dir)
     _set_task(task_id, progress=96, message="正在整理试听和下载文件…")
-    return {"job_id": request.job_id, "lines": lines, "gaps": gaps,
-            "audio_url": f"/api/jobs/{request.job_id}/audio", "filename": out.name,
-            "duration": job.get("duration_out", 0), "sample_rate": sr}
+    return {
+        "job_id": request.job_id,
+        "lines": lines,
+        "gaps": gaps,
+        "audio_url": f"/api/jobs/{request.job_id}/audio",
+        "filename": out.name,
+        "duration": job.get("duration_out", 0),
+        "sample_rate": sr,
+    }
 
 
 def _run_regenerate(task_id: str, request: RegenerateRequest) -> dict[str, Any]:
@@ -418,24 +617,23 @@ def _run_regenerate(task_id: str, request: RegenerateRequest) -> dict[str, Any]:
     text = request.text.strip()
     if not text:
         raise RuntimeError("这句台词为空，无法生成。")
-    prompt = _PROMPTS.get(request.job_id)
-    model = _get_tts_model(task_id)
-    if prompt is None:
-        _set_task(task_id, progress=20, message="正在重新准备音色参考…")
-        ref_audio, ref_text = _make_reference(
-            job, job_dir, float(job["reference_start"]), float(job["reference_end"]),
-            job.get("transcript_text", ""), job.get("reference_text", ""),
-        )
-        prompt = model.create_voice_clone_prompt(ref_audio=str(ref_audio), ref_text=ref_text, x_vector_only_mode=False)
-        _PROMPTS[request.job_id] = prompt
-    _set_task(task_id, progress=45, message=f"正在单独重做第 {request.line_index + 1} 句…")
-    _synthesize_line(model, prompt, text, job_dir / f"segment_{request.line_index:03d}.wav")
+    backend = _get_tts_backend(task_id)
+    prompt = _free_prompt(job, job_dir, backend)
+    _set_task(
+        task_id, progress=45, message=f"正在单独重做第 {request.line_index + 1} 句…"
+    )
+    backend.synthesize(text, prompt, job_dir / f"segment_{request.line_index:03d}.wav")
     lines[request.line_index] = text
     job["lines"] = lines
     out = _assemble_mp3(job, job_dir)
-    return {"job_id": request.job_id, "line_index": request.line_index, "text": text,
-            "audio_url": f"/api/jobs/{request.job_id}/audio", "filename": out.name,
-            "segment_url": f"/api/jobs/{request.job_id}/segments/{request.line_index}"}
+    return {
+        "job_id": request.job_id,
+        "line_index": request.line_index,
+        "text": text,
+        "audio_url": f"/api/jobs/{request.job_id}/audio",
+        "filename": out.name,
+        "segment_url": f"/api/jobs/{request.job_id}/segments/{request.line_index}",
+    }
 
 
 @app.get("/", response_class=HTMLResponse)
@@ -452,7 +650,9 @@ def health() -> dict[str, Any]:
 async def upload_video(file: UploadFile = File(...)) -> dict[str, Any]:
     suffix = Path(file.filename or "").suffix.lower()
     if suffix not in ALLOWED_VIDEO_SUFFIXES:
-        raise HTTPException(status_code=400, detail="请选择 MP4、MOV、M4V、MKV 或 WebM 视频。")
+        raise HTTPException(
+            status_code=400, detail="请选择 MP4、MOV、M4V、MKV 或 WebM 视频。"
+        )
     job_id = str(uuid.uuid4())
     job_dir = JOBS_DIR / job_id
     job_dir.mkdir(parents=True, exist_ok=True)
@@ -463,7 +663,9 @@ async def upload_video(file: UploadFile = File(...)) -> dict[str, Any]:
             while chunk := await file.read(1024 * 1024):
                 total += len(chunk)
                 if total > MAX_UPLOAD_BYTES:
-                    raise HTTPException(status_code=413, detail="视频超过 2 GB，请先剪成较短片段。")
+                    raise HTTPException(
+                        status_code=413, detail="视频超过 2 GB，请先剪成较短片段。"
+                    )
                 output.write(chunk)
     except HTTPException:
         shutil.rmtree(job_dir, ignore_errors=True)
@@ -474,21 +676,36 @@ async def upload_video(file: UploadFile = File(...)) -> dict[str, Any]:
         shutil.rmtree(job_dir, ignore_errors=True)
         raise HTTPException(status_code=400, detail="视频文件为空。")
     try:
-        asr, tts, duration = await asyncio.to_thread(_extract_audio, video_path, job_dir, "upload")
+        asr, tts, duration = await asyncio.to_thread(
+            _extract_audio, video_path, job_dir, "upload"
+        )
     except Exception as exc:
         shutil.rmtree(job_dir, ignore_errors=True)
         if isinstance(exc, HTTPException):
             raise
         raise HTTPException(status_code=400, detail=str(exc)) from exc
-    job = {"job_id": job_id, "source_name": Path(file.filename or "视频").name,
-           "source_path": str(video_path), "duration": duration,
-           "source_asr": str(asr), "source_tts": str(tts), "transcribed": False,
-           "transcript_text": "", "alignments": [], "lines": [], "gaps": []}
+    job = {
+        "job_id": job_id,
+        "source_name": Path(file.filename or "视频").name,
+        "source_path": str(video_path),
+        "duration": duration,
+        "source_asr": str(asr),
+        "source_tts": str(tts),
+        "transcribed": False,
+        "transcript_text": "",
+        "alignments": [],
+        "lines": [],
+        "gaps": [],
+    }
     _write_job(job)
     RECENT_FILE.parent.mkdir(parents=True, exist_ok=True)
     RECENT_FILE.write_text(json.dumps({"job_id": job_id}), encoding="utf-8")
-    return {"job_id": job_id, "source_name": job["source_name"], "duration": duration,
-            "video_url": f"/api/jobs/{job_id}/video"}
+    return {
+        "job_id": job_id,
+        "source_name": job["source_name"],
+        "duration": duration,
+        "video_url": f"/api/jobs/{job_id}/video",
+    }
 
 
 @app.post("/api/transcribe")
@@ -518,6 +735,13 @@ def regenerate(body: RegenerateRequest) -> dict[str, str]:
     _claim_task(task_id)
     _start_task(task_id, _run_regenerate, body)
     return {"task_id": task_id}
+
+
+@app.get("/api/active-task")
+def active_task():
+    with TASKS_LOCK:
+        task = TASKS.get(ACTIVE_TASK_ID, {})
+        return {"task_id": ACTIVE_TASK_ID, "job_id": task.get("job_id")}
 
 
 @app.get("/api/tasks/{task_id}")
@@ -572,6 +796,7 @@ def get_job_state(job_id: str):
     output = Path(job.get("output_path", "")) if job.get("output_path") else None
     return {
         "job_id": job_id,
+        "dialogue_segments": job.get("dialogue_segments", []),
         "source_name": job["source_name"],
         "duration": job["duration"],
         "video_url": f"/api/jobs/{job_id}/video",
@@ -604,23 +829,37 @@ def get_recent_job():
 
 @app.delete("/api/jobs/{job_id}")
 def delete_job(job_id: str):
-    with TASKS_LOCK:
-        if ACTIVE_TASK_ID:
-            raise HTTPException(status_code=409, detail="任务正在运行，完成后再清理项目。")
+    with _mutation_guard():
+        return _delete_job_unlocked(job_id)
+
+
+def _delete_job_unlocked(job_id):
     job_dir = _job_dir(job_id)
     job = _read_job(job_id)
     output_path = Path(job.get("output_path", "")) if job.get("output_path") else None
     shutil.rmtree(job_dir, ignore_errors=True)
-    _PROMPTS.pop(job_id, None)
+    PROMPT_CACHE.clear_job(job_id)
     if RECENT_FILE.is_file():
         try:
-            if json.loads(RECENT_FILE.read_text(encoding="utf-8")).get("job_id") == job_id:
+            if (
+                json.loads(RECENT_FILE.read_text(encoding="utf-8")).get("job_id")
+                == job_id
+            ):
                 RECENT_FILE.unlink()
         except Exception:
             pass
-    if output_path and output_path.is_file() and output_path.parent == OUTPUT_DIR.resolve():
+    if (
+        output_path
+        and output_path.is_file()
+        and output_path.parent == OUTPUT_DIR.resolve()
+    ):
         output_path.unlink()
     return {"ok": True}
+
+
+# Pass the module to resolve callbacks dynamically (also supports model-free tests).
+
+register_routes(app, sys.modules[__name__])
 
 
 def _open_browser(url: str) -> None:

@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import gc
 import json
+import math
 import sys
 import traceback
 from pathlib import Path
@@ -22,7 +23,15 @@ def value(obj: Any, *names: str, default=None):
 
 def serialize_alignments(result: Any, duration: float) -> list[dict[str, Any]]:
     raw = value(result, "time_stamps", "timestamps", default=[]) or []
-    if isinstance(raw, list) and raw and isinstance(raw[0], list):
+    if not isinstance(raw, (list, tuple)):
+        raw = value(raw, "items", default=[]) or []
+    if (
+        isinstance(raw, list)
+        and raw
+        and isinstance(raw[0], list)
+        and raw[0]
+        and not isinstance(raw[0][0], str)
+    ):
         raw = raw[0]
     items: list[dict[str, Any]] = []
     for item in raw:
@@ -35,8 +44,32 @@ def serialize_alignments(result: Any, duration: float) -> list[dict[str, Any]]:
             start_f, end_f = float(start), float(end)
         except (TypeError, ValueError):
             continue
+        if not math.isfinite(start_f) or not math.isfinite(end_f):
+            continue
+        start_f, end_f = max(0.0, start_f), min(duration, end_f)
         if text and end_f > start_f:
-            items.append({"text": text, "start": max(0.0, start_f), "end": min(duration, end_f)})
+            items.append({"text": text, "start": start_f, "end": end_f})
+    # Aligners may omit punctuation. Reattach only where lexical characters match
+    # the ASR transcript; timestamps continue to belong to exactly the same word.
+    transcript = str(value(result, "text", default=""))
+    positions = [i for i, ch in enumerate(transcript) if ch.isalnum()]
+    normalized = "".join(transcript[i].casefold() for i in positions)
+    cursor = 0
+    for item in items:
+        token = "".join(ch.casefold() for ch in item["text"] if ch.isalnum())
+        if not token:
+            continue
+        index = normalized.find(token, cursor)
+        if index < 0:
+            continue
+        last = index + len(token) - 1
+        if last >= len(positions):
+            continue
+        stop = positions[last] + 1
+        while stop < len(transcript) and not transcript[stop].isalnum():
+            stop += 1
+        item["text"] = transcript[positions[index] : stop].strip()
+        cursor = last + 1
     return items
 
 
@@ -68,8 +101,11 @@ def main() -> int:
     asr_path, aligner_path = Path(args.asr_model), Path(args.aligner_model)
     try:
         import torch
+
         devices = ["mps", "cpu"] if torch.backends.mps.is_available() else ["cpu"]
-        attempts = [(device, True) for device in devices] + [(device, False) for device in devices]
+        attempts = [(device, True) for device in devices] + [
+            (device, False) for device in devices
+        ]
         errors = []
         output = None
         model = None
@@ -77,10 +113,14 @@ def main() -> int:
             try:
                 status = "ASR and timestamp model" if with_aligner else "ASR only"
                 print(f"Loading {status} on {device}…", file=sys.stderr, flush=True)
-                model = load_model(asr_path, aligner_path, device, with_aligner=with_aligner)
+                model = load_model(
+                    asr_path, aligner_path, device, with_aligner=with_aligner
+                )
                 print("Transcribing source audio…", file=sys.stderr, flush=True)
                 results = model.transcribe(
-                    audio=args.audio, language=None, return_time_stamps=with_aligner,
+                    audio=args.audio,
+                    language=None,
+                    return_time_stamps=with_aligner,
                 )
                 if not results:
                     raise RuntimeError("没有识别到台词。")
@@ -88,12 +128,19 @@ def main() -> int:
                 text = str(value(result, "text", default="")).strip()
                 if not text:
                     raise RuntimeError("没有识别到台词。")
-                alignments = serialize_alignments(result, args.duration) if with_aligner else []
-                output = {"transcript_text": text, "alignments": alignments,
-                          "alignment_available": bool(alignments)}
+                alignments = (
+                    serialize_alignments(result, args.duration) if with_aligner else []
+                )
+                output = {
+                    "transcript_text": text,
+                    "alignments": alignments,
+                    "alignment_available": bool(alignments),
+                }
                 break
             except Exception as exc:
-                errors.append(f"{device} {'with aligner' if with_aligner else 'without aligner'}: {type(exc).__name__}: {exc}")
+                errors.append(
+                    f"{device} {'with aligner' if with_aligner else 'without aligner'}: {type(exc).__name__}: {exc}"
+                )
                 model = None
                 gc.collect()
                 if torch.backends.mps.is_available():
